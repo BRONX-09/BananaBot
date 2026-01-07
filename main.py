@@ -6,6 +6,8 @@ import yt_dlp
 import asyncio
 from discord.ext import tasks
 from dotenv import load_dotenv
+import requests
+from bs4 import BeautifulSoup
 
 load_dotenv()
 
@@ -68,6 +70,70 @@ async def play(ctx, *, search: str):
             except Exception as e:
                 await ctx.send(f"An error occurred: {e}")
                 print(f"Detailed Error: {e}")
+
+@bot.event
+async def on_voice_state_update(member, before, after):
+    voice_client = member.guild.voice_client
+    if not voice_client:
+        return
+    
+    if len(voice_client.channel.members) == 1:
+        await asyncio.sleep(60)
+        
+        if len(voice_client.channel.members) == 1:
+            await voice_client.disconnect()
+            
+            text_channel = discord.utils.get(member.guild.text_channels, name="bot-commands")
+            if text_channel:
+                await text_channel.send("Going to sleep.")
+
+@tasks.loop(hours=24)
+async def check_free_games():
+
+    channel = discord.utils.get(bot.get_all_channels(), name="whats-free-to-play")
+    if not channel:
+        return
+
+    # Epic
+    try:
+        epic_url = "https://store-site-backend-static.ak.epicgames.com/freeGamesPromotions"
+        response = requests.get(epic_url).json()
+        games = response['data']['Catalog']['searchStore']['elements']
+        
+        for game in games:
+            promotions = game.get('promotions')
+            if promotions and promotions.get('promotionalOffers'):
+                offers = promotions['promotionalOffers'][0]['promotionalOffers']
+                if any(offer.get('discountSetting', {}).get('discountPercentage') == 0 for offer in offers):
+                    title = game['title']
+                    slug = game['catalogNs']['mappings'][0]['pageSlug']
+                    link = f"https://store.epicgames.com/en-US/p/{slug}"
+                    await channel.send(f"🎮 **Epic Games FREEBIE:** {title}\n{link}")
+    except Exception as e:
+        print(f"Epic Error: {e}")
+
+    # Steam
+    try:
+        steam_search_url = "https://store.steampowered.com/search/?maxprice=free&category1=998&specials=1"
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        res = requests.get(steam_search_url, headers=headers)
+        soup = BeautifulSoup(res.text, 'html.parser')
+        
+        search_results = soup.find('div', id='search_resultsRows')
+        if search_results:
+            game_links = search_results.find_all('a')
+            for game in game_links:
+                title = game.find('span', class_='title').text
+                link = game['href'].split('?')[0] 
+                await channel.send(f"♨️ **Steam FREEBIE (Limited Time):** {title}\n{link}")
+    except Exception as e:
+        print(f"Steam Error: {e}")
+
+@check_free_games.before_loop
+async def before_check_free_games():
+    await bot.wait_until_ready()
+
+check_free_games.start()
 
 @bot.command()
 async def leave(ctx):
