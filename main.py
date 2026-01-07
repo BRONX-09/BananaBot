@@ -4,7 +4,6 @@ import discord
 from discord.ext import commands, tasks
 import yt_dlp
 import asyncio
-from discord.ext import tasks
 from dotenv import load_dotenv
 import requests
 from bs4 import BeautifulSoup
@@ -87,9 +86,14 @@ async def on_voice_state_update(member, before, after):
             if text_channel:
                 await text_channel.send("Going to sleep.")
 
+@bot.event
+async def on_ready():
+    print(f'Logged in as {bot.user.name}')
+    if not check_free_games.is_running():
+        check_free_games.start()
+
 @tasks.loop(hours=24)
 async def check_free_games():
-
     channel = discord.utils.get(bot.get_all_channels(), name="whats-free-to-play")
     if not channel:
         return
@@ -106,13 +110,30 @@ async def check_free_games():
                 offers = promotions['promotionalOffers'][0]['promotionalOffers']
                 if any(offer.get('discountSetting', {}).get('discountPercentage') == 0 for offer in offers):
                     title = game['title']
+                    description = game.get('description', 'No description available.')
                     slug = game.get('catalogNs', {}).get('mappings', [{}])[0].get('pageSlug') or game.get('urlSlug')
                     link = f"https://store.epicgames.com/en-US/p/{slug}"
-                    await channel.send(f"🎮 **Epic Games FREEBIE:** {title}\n{link}")
+                    
+                    image_url = None
+                    for image in game.get('keyImages', []):
+                        if image.get('type') in ['Thumbnail', 'OfferImageWide', 'DieselStoreFrontWide']:
+                            image_url = image.get('url')
+                            break
+
+                    embed = discord.Embed(
+                        title=f"FREE ON EPIC: {title}",
+                        url=link,
+                        description=description[:200] + "..." if len(description) > 200 else description,
+                        color=discord.Color.blue()
+                    )
+                    if image_url:
+                        embed.set_image(url=image_url)
+                    embed.set_footer(text="Grab it on Epic Games Store!")
+                    await channel.send(embed=embed)
     except Exception as e:
         print(f"Epic Error: {e}")
 
-    # Steam
+    # Steam 
     try:
         steam_search_url = "https://store.steampowered.com/search/?maxprice=free&category1=998&specials=1"
         headers = {'User-Agent': 'Mozilla/5.0'}
@@ -124,8 +145,21 @@ async def check_free_games():
             game_links = search_results.find_all('a')
             for game in game_links:
                 title = game.find('span', class_='title').text
-                link = game['href'].split('?')[0] 
-                await channel.send(f"♨️ **Steam FREEBIE (Limited Time):** {title}\n{link}")
+                link = game['href'].split('?')[0]
+                # Extract Steam App ID to get the header image
+                app_id = link.split('/')[4]
+                img_url = f"https://cdn.akamai.steamstatic.com/steam/apps/{app_id}/header.jpg"
+
+                steam_embed = discord.Embed(
+                    title=f"FREE ON STEAM: {title}",
+                    url=link,
+                    description="This paid game is currently free to keep on Steam! ♨️",
+                    color=discord.Color.dark_gray()
+                )
+                steam_embed.set_image(url=img_url)
+                steam_embed.set_footer(text="Limited time offer on Steam")
+                
+                await channel.send(embed=steam_embed)
     except Exception as e:
         print(f"Steam Error: {e}")
 
@@ -133,7 +167,6 @@ async def check_free_games():
 async def before_check_free_games():
     await bot.wait_until_ready()
 
-check_free_games.start()
 
 @bot.command()
 async def leave(ctx):
