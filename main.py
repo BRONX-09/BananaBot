@@ -106,7 +106,7 @@ async def check_free_games():
                 offers = promotions['promotionalOffers'][0]['promotionalOffers']
                 if any(offer.get('discountSetting', {}).get('discountPercentage') == 0 for offer in offers):
                     title = game['title']
-                    slug = game['catalogNs']['mappings'][0]['pageSlug']
+                    slug = game.get('catalogNs', {}).get('mappings', [{}])[0].get('pageSlug') or game.get('urlSlug')
                     link = f"https://store.epicgames.com/en-US/p/{slug}"
                     await channel.send(f"🎮 **Epic Games FREEBIE:** {title}\n{link}")
     except Exception as e:
